@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { MapPin, Map as MapIcon, List, Users, Clock, Umbrella, Bath, Lightbulb, Plus, X, ChevronRight, Beer, Share2 } from "lucide-react";
+import { MapPin, Map as MapIcon, List, Search, Users, Clock, Umbrella, Bath, Lightbulb, Plus, X, ChevronRight, Beer, Share2 } from "lucide-react";
 
 // 마포구 동별 대략적인 중심 좌표 (정확한 매장 위치가 아닌 동 단위 근사치)
 const NEIGHBORHOOD_COORDS = {
@@ -56,6 +56,12 @@ function MapView({ spots, onSelect }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const markersRef = useRef([]);
+  const placesRef = useRef(null);
+  const searchMarkerRef = useRef(null);
+
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searchState, setSearchState] = useState("idle"); // idle | searching | results | empty | error
 
   useEffect(() => {
     if (status !== "ready" || !containerRef.current) return;
@@ -95,6 +101,54 @@ function MapView({ spots, onSelect }) {
     if (plotted.length > 0) mapRef.current.setBounds(bounds);
   }, [status, spots, onSelect]);
 
+  function moveToResult(place) {
+    const position = new window.kakao.maps.LatLng(Number(place.y), Number(place.x));
+    mapRef.current.panTo(position);
+    if (searchMarkerRef.current) searchMarkerRef.current.setMap(null);
+    searchMarkerRef.current = new window.kakao.maps.Marker({ position, map: mapRef.current });
+    setQuery(place.place_name);
+    setResults([]);
+    setSearchState("idle");
+  }
+
+  function runSearch() {
+    const q = query.trim();
+    if (!q || status !== "ready") return;
+    if (!placesRef.current) placesRef.current = new window.kakao.maps.services.Places();
+
+    setSearchState("searching");
+    placesRef.current.keywordSearch(
+      q,
+      (data, kakaoStatus) => {
+        if (kakaoStatus === window.kakao.maps.services.Status.OK) {
+          if (data.length === 1) {
+            moveToResult(data[0]);
+          } else {
+            setResults(data);
+            setSearchState("results");
+          }
+        } else if (kakaoStatus === window.kakao.maps.services.Status.ZERO_RESULT) {
+          setResults([]);
+          setSearchState("empty");
+        } else {
+          setResults([]);
+          setSearchState("error");
+        }
+      },
+      { location: mapRef.current.getCenter(), radius: 20000 }
+    );
+  }
+
+  function clearSearch() {
+    setQuery("");
+    setResults([]);
+    setSearchState("idle");
+    if (searchMarkerRef.current) {
+      searchMarkerRef.current.setMap(null);
+      searchMarkerRef.current = null;
+    }
+  }
+
   if (status === "error") {
     return (
       <div style={styles.mapStatus}>
@@ -105,6 +159,57 @@ function MapView({ spots, onSelect }) {
 
   return (
     <div>
+      {status === "ready" && (
+        <div style={styles.mapSearchWrap}>
+          <form
+            style={styles.mapSearchForm}
+            onSubmit={(e) => {
+              e.preventDefault();
+              runSearch();
+            }}
+          >
+            <Search size={14} color="var(--muted)" />
+            <input
+              style={styles.mapSearchInput}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="동네 이름이나 편의점 이름으로 검색"
+            />
+            {query && (
+              <button type="button" style={styles.mapSearchClear} onClick={clearSearch}>
+                <X size={14} />
+              </button>
+            )}
+          </form>
+
+          {searchState === "results" && (
+            <div style={styles.searchResultsList}>
+              {results.map((place, i) => (
+                <button
+                  key={place.id}
+                  style={{
+                    ...styles.searchResultItem,
+                    ...(i === results.length - 1 ? { borderBottom: "none" } : {}),
+                  }}
+                  onClick={() => moveToResult(place)}
+                >
+                  <div style={styles.searchResultName}>{place.place_name}</div>
+                  <div style={styles.searchResultAddr}>
+                    {place.road_address_name || place.address_name}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          {searchState === "empty" && (
+            <div style={styles.searchMsg}>검색 결과가 없어요.</div>
+          )}
+          {searchState === "error" && (
+            <div style={styles.searchMsg}>검색 중 문제가 생겼어요. 다시 시도해주세요.</div>
+          )}
+        </div>
+      )}
+
       <div style={styles.mapContainer}>
         {status === "loading" && <div style={styles.mapStatus}>지도 불러오는 중...</div>}
         <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
@@ -174,61 +279,7 @@ async function shareSpotToKakao(spot, onError) {
   }
 }
 
-// ---- 목업 데이터 (실제 서비스에서는 유저 제보 기반으로 채워짐) ----
-const initialSpots = [
-  {
-    id: 1,
-    name: "GS25 연남중앙점",
-    area: "마포구 연남동",
-    tables: 3,
-    roof: true,
-    restroom: true,
-    lighting: "밝음",
-    lastReport: 8,
-    status: "open",
-    tags: ["단골 많음", "안주 다양"],
-    note: "저녁 7시 넘으면 자리 금방 참. 안주 코너 잘 되어있음.",
-  },
-  {
-    id: 2,
-    name: "CU 합정역점",
-    area: "마포구 합정동",
-    tables: 2,
-    roof: false,
-    restroom: false,
-    lighting: "보통",
-    lastReport: 25,
-    status: "busy",
-    tags: ["역 근처", "즉흥 모임"],
-    note: "역 바로 앞이라 접근성 최고. 지붕은 없어서 비 오면 패스.",
-  },
-  {
-    id: 3,
-    name: "세븐일레븐 망원포구점",
-    area: "마포구 망원동",
-    tables: 4,
-    roof: true,
-    restroom: true,
-    lighting: "밝음",
-    lastReport: 3,
-    status: "open",
-    tags: ["넓음", "조용함"],
-    note: "테이블이 넉넉해서 4명까지도 여유 있음.",
-  },
-  {
-    id: 4,
-    name: "GS25 상수역점",
-    area: "마포구 상수동",
-    tables: 1,
-    roof: false,
-    restroom: false,
-    lighting: "어두움",
-    lastReport: 52,
-    status: "unknown",
-    tags: [],
-    note: "제보가 오래돼서 지금 상태는 확실치 않음.",
-  },
-];
+// 스팟 데이터는 /api/spots (Upstash Redis)에서 불러옴. 시드 데이터는 api/_redis.js에 있음.
 
 const statusMeta = {
   open: { label: "자리 있음", dot: "var(--ok)" },
@@ -242,49 +293,125 @@ const filters = [
   { key: "roof", label: "지붕 있음" },
 ];
 
-function timeAgoLabel(min) {
+function timeAgoLabel(ts) {
+  const min = Math.max(0, Math.floor((Date.now() - ts) / 60000));
+  if (min < 1) return "방금 전";
   if (min < 60) return `${min}분 전`;
   return `${Math.floor(min / 60)}시간 전`;
 }
 
+function deriveStatus(spot) {
+  const minutesAgo = (Date.now() - spot.lastReportAt) / 60000;
+  if (minutesAgo > 45) return "unknown";
+  return spot.status === "busy" ? "busy" : "open";
+}
+
 export default function PyeonmaekJido() {
-  const [spots, setSpots] = useState(initialSpots);
+  const [spots, setSpots] = useState(null); // null = 초기 로딩 중
+  const [loadError, setLoadError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [filter, setFilter] = useState("all");
   const [view, setView] = useState("list");
   const [selected, setSelected] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [toast, setToast] = useState(null);
 
-  const filtered = useMemo(() => {
-    if (filter === "all") return spots;
-    if (filter === "open") return spots.filter((s) => s.status === "open");
-    if (filter === "roof") return spots.filter((s) => s.roof);
-    return spots;
-  }, [spots, filter]);
+  function loadSpots() {
+    setLoadError(false);
+    setSpots(null);
+    fetch("/api/spots")
+      .then((res) => {
+        if (!res.ok) throw new Error("fetch failed");
+        return res.json();
+      })
+      .then((data) => setSpots(data))
+      .catch(() => setLoadError(true));
+  }
 
-  function checkIn(id) {
-    setSpots((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status: "open", lastReport: 0 } : s))
-    );
-    setToast("자리 있음으로 제보했어요");
+  useEffect(() => {
+    loadSpots();
+  }, []);
+
+  const displaySpots = useMemo(() => {
+    if (!spots) return [];
+    return spots.map((s) => ({ ...s, status: deriveStatus(s) }));
+  }, [spots]);
+
+  const filtered = useMemo(() => {
+    if (filter === "open") return displaySpots.filter((s) => s.status === "open");
+    if (filter === "roof") return displaySpots.filter((s) => s.roof);
+    return displaySpots;
+  }, [displaySpots, filter]);
+
+  function flashToast(msg) {
+    setToast(msg);
     setTimeout(() => setToast(null), 2000);
   }
 
-  function addSpot(newSpot) {
-    setSpots((prev) => [
-      { ...newSpot, id: prev.length + 1, lastReport: 0, status: "open", tags: [] },
-      ...prev,
-    ]);
-    setShowForm(false);
-    setToast("새 스팟이 등록됐어요");
-    setTimeout(() => setToast(null), 2000);
+  async function checkIn(id) {
+    try {
+      const res = await fetch(`/api/spots/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "open" }),
+      });
+      if (!res.ok) throw new Error("checkin failed");
+      const updated = await res.json();
+      setSpots((prev) => prev.map((s) => (s.id === id ? updated : s)));
+      setSaveError(false);
+      flashToast("자리 있음으로 제보했어요");
+    } catch (e) {
+      setSaveError(true);
+      flashToast("제보에 실패했어요. 다시 시도해주세요.");
+    }
+  }
+
+  async function addSpot(newSpot) {
+    try {
+      const res = await fetch("/api/spots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newSpot),
+      });
+      if (!res.ok) throw new Error("create failed");
+      const created = await res.json();
+      setSpots((prev) => [created, ...prev]);
+      setShowForm(false);
+      setSaveError(false);
+      flashToast("새 스팟이 등록됐어요");
+    } catch (e) {
+      setSaveError(true);
+      flashToast("등록에 실패했어요. 다시 시도해주세요.");
+    }
   }
 
   function handleShare(spot) {
     shareSpotToKakao(spot, () => {
-      setToast("카톡 공유를 사용할 수 없어요");
-      setTimeout(() => setToast(null), 2000);
+      flashToast("카톡 공유를 사용할 수 없어요");
     });
+  }
+
+  if (spots === null && !loadError) {
+    return (
+      <div style={styles.app}>
+        <style>{fontImport}</style>
+        <div style={styles.loadingWrap}>스팟 불러오는 중...</div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div style={styles.app}>
+        <style>{fontImport}</style>
+        <div style={styles.loadingWrap}>
+          <div>스팟을 불러오지 못했어요.</div>
+          <button style={styles.retryBtn} onClick={loadSpots}>
+            다시 시도
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -340,6 +467,10 @@ export default function PyeonmaekJido() {
         </button>
       </div>
 
+      {saveError && (
+        <div style={styles.errorBanner}>저장에 실패했어요. 네트워크를 확인해주세요.</div>
+      )}
+
       {view === "map" ? (
         <div style={styles.mapSection}>
           <MapView spots={filtered} onSelect={setSelected} />
@@ -368,7 +499,7 @@ export default function PyeonmaekJido() {
                       <Users size={13} /> 테이블 {spot.tables}
                     </span>
                     <span style={styles.metaItem}>
-                      <Clock size={13} /> {timeAgoLabel(spot.lastReport)}
+                      <Clock size={13} /> {timeAgoLabel(spot.lastReportAt)}
                     </span>
                     {spot.roof && (
                       <span style={styles.metaItem}>
@@ -435,7 +566,7 @@ export default function PyeonmaekJido() {
               지금 자리 있어요 제보하기
             </button>
             <div style={styles.lastReportLine}>
-              마지막 제보 {timeAgoLabel(selected.lastReport)}
+              마지막 제보 {timeAgoLabel(selected.lastReportAt)}
             </div>
           </div>
         </div>
@@ -639,6 +770,36 @@ const styles = {
     cursor: "pointer",
     whiteSpace: "nowrap",
   },
+  loadingWrap: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    minHeight: "60vh",
+    color: "var(--muted)",
+    fontSize: 13.5,
+    textAlign: "center",
+  },
+  retryBtn: {
+    fontFamily: "inherit",
+    fontSize: 13,
+    fontWeight: 700,
+    padding: "8px 16px",
+    borderRadius: 999,
+    border: "1px solid var(--accent)",
+    background: "transparent",
+    color: "var(--accent)",
+    cursor: "pointer",
+  },
+  errorBanner: {
+    margin: "0 20px 10px",
+    padding: "8px 12px",
+    borderRadius: 10,
+    fontSize: 12,
+    background: "rgba(255,138,91,0.12)",
+    color: "var(--warn)",
+  },
   viewToggleRow: {
     display: "flex",
     gap: 6,
@@ -664,6 +825,67 @@ const styles = {
     color: "var(--accent)",
   },
   mapSection: { padding: "10px 16px 4px" },
+  mapSearchWrap: { marginBottom: 8 },
+  mapSearchForm: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: "rgba(255,255,255,0.055)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: 12,
+    padding: "10px 12px",
+  },
+  mapSearchInput: {
+    flex: 1,
+    fontFamily: "inherit",
+    fontSize: 14,
+    color: "var(--text)",
+    background: "transparent",
+    border: "none",
+    outline: "none",
+    minWidth: 0,
+  },
+  mapSearchClear: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "transparent",
+    border: "none",
+    color: "var(--muted)",
+    cursor: "pointer",
+    padding: 2,
+    flexShrink: 0,
+  },
+  searchResultsList: {
+    marginTop: 6,
+    background: "var(--card)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 12,
+    overflow: "hidden",
+    maxHeight: 220,
+    overflowY: "auto",
+  },
+  searchResultItem: {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    fontFamily: "inherit",
+    background: "transparent",
+    border: "none",
+    borderBottom: "1px solid rgba(255,255,255,0.05)",
+    padding: "10px 12px",
+    cursor: "pointer",
+    color: "inherit",
+  },
+  searchResultName: { fontSize: 13.5, fontWeight: 600 },
+  searchResultAddr: { fontSize: 11.5, color: "var(--muted)", marginTop: 2 },
+  searchMsg: {
+    marginTop: 6,
+    fontSize: 12.5,
+    color: "var(--muted)",
+    textAlign: "center",
+    padding: "10px 0",
+  },
   mapContainer: {
     position: "relative",
     width: "100%",
