@@ -57,11 +57,9 @@ function MapView({ spots, onSelect }) {
   const mapRef = useRef(null);
   const markersRef = useRef([]);
   const placesRef = useRef(null);
-  const searchMarkerRef = useRef(null);
 
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState([]);
-  const [searchState, setSearchState] = useState("idle"); // idle | searching | results | empty | error
+  const [searchState, setSearchState] = useState("idle"); // idle | searching | empty | error
 
   useEffect(() => {
     if (status !== "ready" || !containerRef.current) return;
@@ -104,10 +102,7 @@ function MapView({ spots, onSelect }) {
   function moveToResult(place) {
     const position = new window.kakao.maps.LatLng(Number(place.y), Number(place.x));
     mapRef.current.panTo(position);
-    if (searchMarkerRef.current) searchMarkerRef.current.setMap(null);
-    searchMarkerRef.current = new window.kakao.maps.Marker({ position, map: mapRef.current });
     setQuery(place.place_name);
-    setResults([]);
     setSearchState("idle");
   }
 
@@ -121,17 +116,10 @@ function MapView({ spots, onSelect }) {
       q,
       (data, kakaoStatus) => {
         if (kakaoStatus === window.kakao.maps.services.Status.OK) {
-          if (data.length === 1) {
-            moveToResult(data[0]);
-          } else {
-            setResults(data);
-            setSearchState("results");
-          }
+          moveToResult(data[0]);
         } else if (kakaoStatus === window.kakao.maps.services.Status.ZERO_RESULT) {
-          setResults([]);
           setSearchState("empty");
         } else {
-          setResults([]);
           setSearchState("error");
         }
       },
@@ -141,12 +129,7 @@ function MapView({ spots, onSelect }) {
 
   function clearSearch() {
     setQuery("");
-    setResults([]);
     setSearchState("idle");
-    if (searchMarkerRef.current) {
-      searchMarkerRef.current.setMap(null);
-      searchMarkerRef.current = null;
-    }
   }
 
   if (status === "error") {
@@ -182,25 +165,6 @@ function MapView({ spots, onSelect }) {
             )}
           </form>
 
-          {searchState === "results" && (
-            <div style={styles.searchResultsList}>
-              {results.map((place, i) => (
-                <button
-                  key={place.id}
-                  style={{
-                    ...styles.searchResultItem,
-                    ...(i === results.length - 1 ? { borderBottom: "none" } : {}),
-                  }}
-                  onClick={() => moveToResult(place)}
-                >
-                  <div style={styles.searchResultName}>{place.place_name}</div>
-                  <div style={styles.searchResultAddr}>
-                    {place.road_address_name || place.address_name}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
           {searchState === "empty" && (
             <div style={styles.searchMsg}>검색 결과가 없어요.</div>
           )}
@@ -856,29 +820,6 @@ const styles = {
     padding: 2,
     flexShrink: 0,
   },
-  searchResultsList: {
-    marginTop: 6,
-    background: "var(--card)",
-    border: "1px solid rgba(255,255,255,0.08)",
-    borderRadius: 12,
-    overflow: "hidden",
-    maxHeight: 220,
-    overflowY: "auto",
-  },
-  searchResultItem: {
-    display: "block",
-    width: "100%",
-    textAlign: "left",
-    fontFamily: "inherit",
-    background: "transparent",
-    border: "none",
-    borderBottom: "1px solid rgba(255,255,255,0.05)",
-    padding: "10px 12px",
-    cursor: "pointer",
-    color: "inherit",
-  },
-  searchResultName: { fontSize: 13.5, fontWeight: 600 },
-  searchResultAddr: { fontSize: 11.5, color: "var(--muted)", marginTop: 2 },
   searchMsg: {
     marginTop: 6,
     fontSize: 12.5,
