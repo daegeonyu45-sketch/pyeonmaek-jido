@@ -1,4 +1,4 @@
-import { redis, spotKey } from "../_redis.js";
+import { redis, INDEX_KEY, spotKey } from "../_redis.js";
 
 export default async function handler(req, res) {
   const { id } = req.query;
@@ -32,6 +32,24 @@ export default async function handler(req, res) {
     return;
   }
 
-  res.setHeader("Allow", "PATCH");
+  if (req.method === "DELETE") {
+    try {
+      const existing = await redis.get(spotKey(id));
+      if (!existing) {
+        res.status(404).json({ error: "spot_not_found" });
+        return;
+      }
+
+      await redis.del(spotKey(id));
+      await redis.srem(INDEX_KEY, id);
+
+      res.status(200).json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "spot_delete_failed" });
+    }
+    return;
+  }
+
+  res.setHeader("Allow", "PATCH, DELETE");
   res.status(405).json({ error: "method_not_allowed" });
 }
