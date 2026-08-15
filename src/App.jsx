@@ -20,6 +20,16 @@ function jitterOffset(id) {
   return [dLat, dLng];
 }
 
+function getSpotPosition(spot) {
+  if (typeof spot.lat === "number" && typeof spot.lng === "number") {
+    return { lat: spot.lat, lng: spot.lng };
+  }
+  const base = NEIGHBORHOOD_COORDS[spot.area];
+  if (!base) return null;
+  const [dLat, dLng] = jitterOffset(spot.id);
+  return { lat: base.lat + dLat, lng: base.lng + dLng };
+}
+
 function useKakaoMaps() {
   const [status, setStatus] = useState("loading"); // loading | ready | error
 
@@ -60,8 +70,8 @@ function MapView({ spots, onSelect }) {
   const searchMarkerRef = useRef(null);
 
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState([]);
-  const [searchState, setSearchState] = useState("idle"); // idle | searching | results | empty | error
+  const [dbMatches, setDbMatches] = useState([]);
+  const [searchState, setSearchState] = useState("idle"); // idle | searching | empty | error
 
   useEffect(() => {
     if (status !== "ready" || !containerRef.current) return;
@@ -78,10 +88,8 @@ function MapView({ spots, onSelect }) {
 
     const plotted = spots
       .map((spot) => {
-        const base = NEIGHBORHOOD_COORDS[spot.area];
-        if (!base) return null;
-        const [dLat, dLng] = jitterOffset(spot.id);
-        return { spot, lat: base.lat + dLat, lng: base.lng + dLng };
+        const pos = getSpotPosition(spot);
+        return pos ? { spot, ...pos } : null;
       })
       .filter(Boolean);
 
@@ -101,37 +109,40 @@ function MapView({ spots, onSelect }) {
     if (plotted.length > 0) mapRef.current.setBounds(bounds);
   }, [status, spots, onSelect]);
 
-  function moveToResult(place) {
-    const position = new window.kakao.maps.LatLng(Number(place.y), Number(place.x));
-    mapRef.current.panTo(position);
-    if (searchMarkerRef.current) searchMarkerRef.current.setMap(null);
-    searchMarkerRef.current = new window.kakao.maps.Marker({ position, map: mapRef.current });
-    setQuery(place.place_name);
-    setResults([]);
-    setSearchState("idle");
+  function placesService() {
+    if (!placesRef.current) placesRef.current = new window.kakao.maps.services.Places();
+    return placesRef.current;
   }
 
-  function runSearch() {
-    const q = query.trim();
-    if (!q || status !== "ready") return;
-    if (!placesRef.current) placesRef.current = new window.kakao.maps.services.Places();
+  // 검색으로 찾아간 위치에 임시 마커를 찍음 (등록된 스팟이면 클릭 시 상세 시트도 열림)
+  function goToPosition(pos, title, clickSpot) {
+    const position = new window.kakao.maps.LatLng(pos.lat, pos.lng);
+    mapRef.current.panTo(position);
+    if (searchMarkerRef.current) searchMarkerRef.current.setMap(null);
+    searchMarkerRef.current = new window.kakao.maps.Marker({ position, title, map: mapRef.current });
+    if (clickSpot) {
+      window.kakao.maps.event.addListener(searchMarkerRef.current, "click", () => onSelect(clickSpot));
+    }
+  }
 
+  function handleQueryChange(value) {
+    setQuery(value);
+    setSearchState("idle");
+    const q = value.trim();
+    setDbMatches(q ? spots.filter((s) => s.name.includes(q)) : []);
+  }
+
+  // 등록된 스팟이 마포구 4개 동 밖에 있어서 좌표를 못 구하면, 이름+지역으로 카카오 검색해서 위치를 찾음
+  function geocodeSpot(spot) {
     setSearchState("searching");
-    placesRef.current.keywordSearch(
-      q,
+    placesService().keywordSearch(
+      `${spot.area} ${spot.name}`,
       (data, kakaoStatus) => {
         if (kakaoStatus === window.kakao.maps.services.Status.OK) {
-          if (data.length === 1) {
-            moveToResult(data[0]);
-          } else {
-            setResults(data);
-            setSearchState("results");
-          }
-        } else if (kakaoStatus === window.kakao.maps.services.Status.ZERO_RESULT) {
-          setResults([]);
-          setSearchState("empty");
+          const place = data[0];
+          goToPosition({ lat: Number(place.y), lng: Number(place.x) }, spot.name, spot);
+          setSearchState("idle");
         } else {
-          setResults([]);
           setSearchState("error");
         }
       },
@@ -139,9 +150,53 @@ function MapView({ spots, onSelect }) {
     );
   }
 
+  function selectDbMatch(spot) {
+    setQuery(spot.name);
+    setDbMatches([]);
+    const pos = getSpotPosition(spot);
+    if (pos) {
+      goToPosition(pos, spot.name, spot);
+    } else {
+      geocodeSpot(spot);
+    }
+  }
+
+  function searchKakao(q) {
+    setSearchState("searching");
+    placesService().keywordSearch(
+      q,
+      (data, kakaoStatus) => {
+        if (kakaoStatus === window.kakao.maps.services.Status.OK) {
+          const place = data[0];
+          goToPosition({ lat: Number(place.y), lng: Number(place.x) }, place.place_name);
+          setQuery(place.place_name);
+          setSearchState("idle");
+        } else if (kakaoStatus === window.kakao.maps.services.Status.ZERO_RESULT) {
+          setSearchState("empty");
+        } else {
+          setSearchState("error");
+        }
+      },
+      { location: mapRef.current.getCenter(), radius: 20000 }
+    );
+  }
+
+  function runSearch() {
+    const q = query.trim();
+    if (!q || status !== "ready") return;
+
+    // 등록된 스팟 이름 매칭을 최우선으로 (엔터 시 첫 후보로 이동), 없으면 카카오 키워드 검색으로 보조
+    if (dbMatches.length > 0) {
+      selectDbMatch(dbMatches[0]);
+      return;
+    }
+
+    searchKakao(q);
+  }
+
   function clearSearch() {
     setQuery("");
-    setResults([]);
+    setDbMatches([]);
     setSearchState("idle");
     if (searchMarkerRef.current) {
       searchMarkerRef.current.setMap(null);
@@ -172,7 +227,7 @@ function MapView({ spots, onSelect }) {
             <input
               style={styles.mapSearchInput}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => handleQueryChange(e.target.value)}
               placeholder="동네 이름이나 편의점 이름으로 검색"
             />
             {query && (
@@ -182,21 +237,19 @@ function MapView({ spots, onSelect }) {
             )}
           </form>
 
-          {searchState === "results" && (
+          {dbMatches.length > 0 && (
             <div style={styles.searchResultsList}>
-              {results.map((place, i) => (
+              {dbMatches.map((spot, i) => (
                 <button
-                  key={place.id}
+                  key={spot.id}
                   style={{
                     ...styles.searchResultItem,
-                    ...(i === results.length - 1 ? { borderBottom: "none" } : {}),
+                    ...(i === dbMatches.length - 1 ? { borderBottom: "none" } : {}),
                   }}
-                  onClick={() => moveToResult(place)}
+                  onClick={() => selectDbMatch(spot)}
                 >
-                  <div style={styles.searchResultName}>{place.place_name}</div>
-                  <div style={styles.searchResultAddr}>
-                    {place.road_address_name || place.address_name}
-                  </div>
+                  <div style={styles.searchResultName}>{spot.name}</div>
+                  <div style={styles.searchResultAddr}>{spot.area}</div>
                 </button>
               ))}
             </div>
@@ -222,10 +275,9 @@ function MapView({ spots, onSelect }) {
 }
 
 function spotMapLink(spot) {
-  const base = NEIGHBORHOOD_COORDS[spot.area];
-  if (!base) return "https://map.kakao.com";
-  const [dLat, dLng] = jitterOffset(spot.id);
-  return `https://map.kakao.com/link/map/${encodeURIComponent(spot.name)},${base.lat + dLat},${base.lng + dLng}`;
+  const pos = getSpotPosition(spot);
+  if (!pos) return "https://map.kakao.com";
+  return `https://map.kakao.com/link/map/${encodeURIComponent(spot.name)},${pos.lat},${pos.lng}`;
 }
 
 let kakaoSdkPromise = null;

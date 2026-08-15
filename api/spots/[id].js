@@ -12,11 +12,17 @@ export default async function handler(req, res) {
       }
 
       const body = req.body || {};
-      const updated = {
-        ...existing,
-        status: body.status === "busy" ? "busy" : "open",
-        lastReportAt: Date.now(),
-      };
+      const updated = { ...existing };
+
+      if (body.status !== undefined) {
+        updated.status = body.status === "busy" ? "busy" : "open";
+        updated.lastReportAt = Date.now();
+      }
+
+      if (typeof body.lat === "number" && typeof body.lng === "number") {
+        updated.lat = body.lat;
+        updated.lng = body.lng;
+      }
 
       await redis.set(spotKey(id), updated);
       res.status(200).json(updated);
