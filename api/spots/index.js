@@ -38,6 +38,11 @@ export default async function handler(req, res) {
         lastReportAt: Date.now(),
       };
 
+      if (typeof body.lat === "number" && typeof body.lng === "number") {
+        spot.lat = body.lat;
+        spot.lng = body.lng;
+      }
+
       await redis.set(spotKey(spot.id), spot);
       await redis.sadd(INDEX_KEY, spot.id);
 
