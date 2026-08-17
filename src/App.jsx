@@ -135,16 +135,31 @@ function MapView({ spots, onSelect }) {
   // 등록된 스팟이 마포구 4개 동 밖에 있어서 좌표를 못 구하면, 이름+지역으로 카카오 검색해서 위치를 찾음
   function geocodeSpot(spot) {
     setSearchState("searching");
+    // 이름만으로 먼저 찾고 (search 실행 경로와 동일한 방식), 실패할 때만 지역명을 붙여서 재시도.
+    // 지역명이 "구 동" 형태가 아니라 콤마/괄호가 섞인 전체 주소일 때 처음부터
+    // 지역명+이름으로 검색하면 카카오 검색이 못 찾는 경우가 있었음.
     placesService().keywordSearch(
-      `${spot.area} ${spot.name}`,
+      spot.name,
       (data, kakaoStatus) => {
         if (kakaoStatus === window.kakao.maps.services.Status.OK) {
           const place = data[0];
           goToPosition({ lat: Number(place.y), lng: Number(place.x) }, spot.name, spot);
           setSearchState("idle");
-        } else {
-          setSearchState("error");
+          return;
         }
+        placesService().keywordSearch(
+          `${spot.area} ${spot.name}`,
+          (data2, kakaoStatus2) => {
+            if (kakaoStatus2 === window.kakao.maps.services.Status.OK) {
+              const place2 = data2[0];
+              goToPosition({ lat: Number(place2.y), lng: Number(place2.x) }, spot.name, spot);
+              setSearchState("idle");
+            } else {
+              setSearchState("error");
+            }
+          },
+          { location: mapRef.current.getCenter(), radius: 20000 }
+        );
       },
       { location: mapRef.current.getCenter(), radius: 20000 }
     );
