@@ -206,17 +206,19 @@
         return status;
       }
 
+      const FOCUS_ZOOM_LEVEL = 3;
+
       function MapView({ spots, onSelect }) {
         const status = useKakaoMaps();
         const containerRef = useRef(null);
         const mapRef = useRef(null);
         const markersRef = useRef([]);
         const placesRef = useRef(null);
-        const searchMarkerRef = useRef(null);
 
         const [query, setQuery] = useState("");
         const [dbMatches, setDbMatches] = useState([]);
         const [searchState, setSearchState] = useState("idle");
+        const [focusedSpot, setFocusedSpot] = useState(null);
 
         useEffect(() => {
           if (status !== "ready" || !containerRef.current) return;
@@ -230,6 +232,22 @@
 
           markersRef.current.forEach((m) => m.setMap(null));
           markersRef.current = [];
+
+          if (focusedSpot) {
+            const position = new window.kakao.maps.LatLng(focusedSpot.lat, focusedSpot.lng);
+            const marker = new window.kakao.maps.Marker({
+              position,
+              title: focusedSpot.title,
+              map: mapRef.current,
+            });
+            if (focusedSpot.spot) {
+              window.kakao.maps.event.addListener(marker, "click", () => onSelect(focusedSpot.spot));
+            }
+            markersRef.current.push(marker);
+            mapRef.current.setLevel(FOCUS_ZOOM_LEVEL);
+            mapRef.current.panTo(position);
+            return;
+          }
 
           const plotted = spots
             .map((spot) => {
@@ -252,21 +270,11 @@
           });
 
           if (plotted.length > 0) mapRef.current.setBounds(bounds);
-        }, [status, spots, onSelect]);
+        }, [status, spots, onSelect, focusedSpot]);
 
         function placesService() {
           if (!placesRef.current) placesRef.current = new window.kakao.maps.services.Places();
           return placesRef.current;
-        }
-
-        function goToPosition(pos, title, clickSpot) {
-          const position = new window.kakao.maps.LatLng(pos.lat, pos.lng);
-          mapRef.current.panTo(position);
-          if (searchMarkerRef.current) searchMarkerRef.current.setMap(null);
-          searchMarkerRef.current = new window.kakao.maps.Marker({ position, title, map: mapRef.current });
-          if (clickSpot) {
-            window.kakao.maps.event.addListener(searchMarkerRef.current, "click", () => onSelect(clickSpot));
-          }
         }
 
         function handleQueryChange(value) {
@@ -283,7 +291,7 @@
             (data, kakaoStatus) => {
               if (kakaoStatus === window.kakao.maps.services.Status.OK) {
                 const place = data[0];
-                goToPosition({ lat: Number(place.y), lng: Number(place.x) }, spot.name, spot);
+                setFocusedSpot({ lat: Number(place.y), lng: Number(place.x), title: spot.name, spot });
                 setSearchState("idle");
                 return;
               }
@@ -292,7 +300,7 @@
                 (data2, kakaoStatus2) => {
                   if (kakaoStatus2 === window.kakao.maps.services.Status.OK) {
                     const place2 = data2[0];
-                    goToPosition({ lat: Number(place2.y), lng: Number(place2.x) }, spot.name, spot);
+                    setFocusedSpot({ lat: Number(place2.y), lng: Number(place2.x), title: spot.name, spot });
                     setSearchState("idle");
                   } else {
                     setSearchState("error");
@@ -310,7 +318,7 @@
           setDbMatches([]);
           const pos = getSpotPosition(spot);
           if (pos) {
-            goToPosition(pos, spot.name, spot);
+            setFocusedSpot({ lat: pos.lat, lng: pos.lng, title: spot.name, spot });
           } else {
             geocodeSpot(spot);
           }
@@ -323,7 +331,7 @@
             (data, kakaoStatus) => {
               if (kakaoStatus === window.kakao.maps.services.Status.OK) {
                 const place = data[0];
-                goToPosition({ lat: Number(place.y), lng: Number(place.x) }, place.place_name);
+                setFocusedSpot({ lat: Number(place.y), lng: Number(place.x), title: place.place_name });
                 setQuery(place.place_name);
                 setSearchState("idle");
               } else if (kakaoStatus === window.kakao.maps.services.Status.ZERO_RESULT) {
@@ -352,10 +360,7 @@
           setQuery("");
           setDbMatches([]);
           setSearchState("idle");
-          if (searchMarkerRef.current) {
-            searchMarkerRef.current.setMap(null);
-            searchMarkerRef.current = null;
-          }
+          setFocusedSpot(null);
         }
 
         if (status === "error") {
