@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { MapPin, Map as MapIcon, List, Search, Users, Clock, Umbrella, Bath, Lightbulb, Plus, X, ChevronRight, Beer, Share2 } from "lucide-react";
+import { MapPin, Map as MapIcon, List, Search, Users, Clock, Umbrella, Bath, Lightbulb, Plus, X, ChevronRight, Beer, Share2, Trash2 } from "lucide-react";
 
 // 마포구 동별 대략적인 중심 좌표 (정확한 매장 위치가 아닌 동 단위 근사치)
 const NEIGHBORHOOD_COORDS = {
@@ -365,8 +365,19 @@ export default function PyeonmaekJido() {
   const [filter, setFilter] = useState("all");
   const [view, setView] = useState("list");
   const [selected, setSelected] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [toast, setToast] = useState(null);
+
+  function selectSpot(spot) {
+    setSelected(spot);
+    setDeleteConfirm(false);
+  }
+
+  function closeSheet() {
+    setSelected(null);
+    setDeleteConfirm(false);
+  }
 
   function loadSpots() {
     setLoadError(false);
@@ -441,6 +452,20 @@ export default function PyeonmaekJido() {
     shareSpotToKakao(spot, () => {
       flashToast("카톡 공유를 사용할 수 없어요");
     });
+  }
+
+  async function handleDelete(id) {
+    try {
+      const res = await fetch(`/api/spots/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("delete failed");
+      setSpots((prev) => prev.filter((s) => s.id !== id));
+      closeSheet();
+      setSaveError(false);
+      flashToast("스팟이 삭제됐어요");
+    } catch (e) {
+      setSaveError(true);
+      flashToast("삭제에 실패했어요. 다시 시도해주세요.");
+    }
   }
 
   if (spots === null && !loadError) {
@@ -525,7 +550,7 @@ export default function PyeonmaekJido() {
 
       {view === "map" ? (
         <div style={styles.mapSection}>
-          <MapView spots={filtered} onSelect={setSelected} />
+          <MapView spots={filtered} onSelect={selectSpot} />
         </div>
       ) : (
         /* 스팟 리스트 */
@@ -537,7 +562,7 @@ export default function PyeonmaekJido() {
             const meta = statusMeta[spot.status];
             return (
               <div key={spot.id} style={styles.card}>
-                <button style={styles.cardMain} onClick={() => setSelected(spot)}>
+                <button style={styles.cardMain} onClick={() => selectSpot(spot)}>
                   <div style={styles.cardTop}>
                     <div style={styles.cardTitleRow}>
                       <span style={{ ...styles.statusDot, background: meta.dot }} />
@@ -580,7 +605,7 @@ export default function PyeonmaekJido() {
 
       {/* 상세 시트 */}
       {selected && (
-        <div style={styles.overlay} onClick={() => setSelected(null)}>
+        <div style={styles.overlay} onClick={closeSheet}>
           <div style={styles.sheet} onClick={(e) => e.stopPropagation()}>
             <div style={styles.sheetHandle} />
             <div style={styles.sheetHeader}>
@@ -588,7 +613,7 @@ export default function PyeonmaekJido() {
                 <div style={styles.sheetTitle}>{selected.name}</div>
                 <div style={styles.cardArea}>{selected.area}</div>
               </div>
-              <button style={styles.closeBtn} onClick={() => setSelected(null)}>
+              <button style={styles.closeBtn} onClick={closeSheet}>
                 <X size={18} />
               </button>
             </div>
@@ -619,6 +644,26 @@ export default function PyeonmaekJido() {
             </button>
             <div style={styles.lastReportLine}>
               마지막 제보 {timeAgoLabel(selected.lastReportAt)}
+            </div>
+
+            <div style={styles.deleteSection}>
+              {deleteConfirm ? (
+                <div style={styles.deleteConfirmRow}>
+                  <span style={styles.deleteConfirmText}>정말 삭제하시겠어요?</span>
+                  <div style={styles.deleteConfirmBtns}>
+                    <button style={styles.deleteCancelBtn} onClick={() => setDeleteConfirm(false)}>
+                      취소
+                    </button>
+                    <button style={styles.deleteConfirmBtn} onClick={() => handleDelete(selected.id)}>
+                      삭제
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button style={styles.deleteBtn} onClick={() => setDeleteConfirm(true)}>
+                  <Trash2 size={13} /> 스팟 삭제
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1114,6 +1159,60 @@ const styles = {
     fontSize: 11.5,
     color: "var(--muted)",
     marginTop: 8,
+  },
+  deleteSection: {
+    marginTop: 18,
+    paddingTop: 14,
+    borderTop: "1px solid rgba(255,255,255,0.06)",
+  },
+  deleteBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    width: "100%",
+    fontFamily: "inherit",
+    fontSize: 12.5,
+    fontWeight: 600,
+    padding: "10px",
+    borderRadius: 10,
+    border: "1px solid rgba(255,138,91,0.3)",
+    background: "transparent",
+    color: "var(--warn)",
+    cursor: "pointer",
+  },
+  deleteConfirmRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    padding: "10px 12px",
+    borderRadius: 10,
+    background: "rgba(255,138,91,0.1)",
+  },
+  deleteConfirmText: { fontSize: 12.5, color: "var(--text)", fontWeight: 600 },
+  deleteConfirmBtns: { display: "flex", gap: 6, flexShrink: 0 },
+  deleteCancelBtn: {
+    fontFamily: "inherit",
+    fontSize: 12,
+    fontWeight: 600,
+    padding: "7px 12px",
+    borderRadius: 8,
+    border: "1px solid rgba(255,255,255,0.15)",
+    background: "transparent",
+    color: "var(--muted)",
+    cursor: "pointer",
+  },
+  deleteConfirmBtn: {
+    fontFamily: "inherit",
+    fontSize: 12,
+    fontWeight: 700,
+    padding: "7px 12px",
+    borderRadius: 8,
+    border: "none",
+    background: "var(--warn)",
+    color: "#2A1408",
+    cursor: "pointer",
   },
   form: { display: "flex", flexDirection: "column", gap: 14 },
   label: {
